@@ -1,0 +1,117 @@
+---
+title: "NYPD shooting analysis"
+author: "Donal"
+date: "2024-08-03"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+# New York Shooting Incidents 1/1/2006 to 12/31/2022
+
+The dataset was taken from the City of New York website and covers from 2006 to 2022 inclusive. The below analysis will explore what time of the week is most common for a shooting incident and have shooting incidents/murders increased or decreased through time.   
+
+## Set the import website and read in the dataset
+
+```{r get_jhu_data}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+shooting_data <- read_csv(url_in)
+
+```
+
+## Change the format
+
+I am going to create two separate datasets to explore the aforementioned questions: 
+
+* The first categorizes the incident time and weekday. I have categorized days into early morning (before 6am), morning (6am to noon), afternoon (noon to 6pm) and evening (6pm onwards)
+
+* The second groups the data into years
+
+```{r tidy_shot_data}
+shooting_days_temp <- shooting_data %>%
+  mutate(shoot_weekday = weekdays.Date(mdy(OCCUR_DATE)))%>%
+  mutate(time_of_day = ifelse(difftime(OCCUR_TIME,6*60*60) < 0, "Early_Morning",ifelse(difftime(OCCUR_TIME, 12*60*60) <0, "Morning", ifelse(difftime(OCCUR_TIME,18*60*60)<0, "Afternoon", "Evening"))))%>%
+  select(c(shoot_weekday, STATISTICAL_MURDER_FLAG, time_of_day))
+
+shooting_days <- shooting_days_temp %>%
+  group_by(shoot_weekday, time_of_day) %>%
+  summarize(fatal_shots = sum(STATISTICAL_MURDER_FLAG==TRUE), non_fatal_shots = sum(STATISTICAL_MURDER_FLAG==FALSE))
+              
+Yearly_shots_temp <- shooting_data %>%
+  mutate(year_of_shot = year(mdy(OCCUR_DATE))) %>%
+  select(year_of_shot, STATISTICAL_MURDER_FLAG)
+
+Yearly_shots <- Yearly_shots_temp %>%
+  group_by(year_of_shot) %>%
+  summarize(fatal_shots = sum(STATISTICAL_MURDER_FLAG==TRUE), non_fatal_shots = sum(STATISTICAL_MURDER_FLAG==FALSE))
+```
+
+## Have a look at the summary stats 
+
+```{r Summarize}
+
+summary(Yearly_shots$fatal_shots)
+summary( Yearly_shots$non_fatal_shots)
+
+```
+
+## Run a linear regression on and plot the yearly data
+
+```{r Year_plot}
+
+mod <- lm(fatal_shots ~ non_fatal_shots, data=Yearly_shots)
+
+Yearly_shots %>% 
+  mutate(pred = predict(mod)) %>%
+  ggplot(aes(x = year_of_shot, y = shots)) +
+  geom_line(aes(y = fatal_shots, color = "fatal_shots")) +
+  geom_point(aes(y = fatal_shots, color = "fatal_shots")) +
+  geom_line(aes(y = pred, color = "pred")) +
+  geom_line(aes(y = non_fatal_shots, color = "non_fatal_shots")) +
+  geom_point(aes(y = non_fatal_shots, color = "non_fatal_shots")) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "Shootings and Murders in New York by Year", y = NULL)
+```
+
+## Plot the weekday 
+
+```{r Weekday_plot}
+shooting_days_temp %>% 
+  ggplot(aes(shoot_weekday, fill=time_of_day)) +
+  geom_bar(alpha = 0.5) +
+  theme_bw() +
+  facet_wrap(~STATISTICAL_MURDER_FLAG) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "Shootings and Murders in New York by day",x = "Day of week" ,y = "Number of shots")
+```
+
+## Conclusions
+
+It appears that most recorded shootings occur in New York at night or in the early morning. There is a jump on early Saturday and Sunday mornings, likely due to increased activity at the weekend. This increase is reflected in both non fatal and fatal shootings. 
+
+The number of reported shootings in New York appears to have decreased through time until 2020 when the incidents spiked again. This could be connected to the outbreak of COVID 19. Are these shootings domestic or in the community? The location of shooting fields appear to include a lot of "NA"s. Since 2021 the shooting incidents have began to decrease again. Overall there appears to be a decrease in shootings in New York through time.
+
+A visual analysis of the goodness of fit of the modeled fatalities based on the number of non fatal shots indicates to me that the likelihood of a given shooting in New York being fatal is has stayed constant through time.
+
+## Sources of bias
+
+Understanding how the data is collected is crucial. In an ideal world we would like to be comfortable in the assumption that the reported shooting incidents in New York, our sample, is reflective of the total shooting incidents in New York. Some potential sources of bias  include:
+
+* has there been an improvement in the reporting (more of the incidents that do occur are reported) due to more trust between the community and the police or an improved reporting system. The opposite could also be true.
+
+* are there certain areas (where there is less trust in policing) or times of the day when a shooting is less/more likely to be reported
+
+* is there an incentive for a police officer to adjust the time of a shooting (to say that it didn't occur while they were on duty) or the location of a shooting (to say that it didn't occur in their precinct)?
+
+We also have to understand why certain variables are collected, such as race, gender and age. What is the question that is trying to be answered by the data set?
+
+Another simple source of bias is my decisions to bucket the data in the way that I did.
